@@ -1,0 +1,17 @@
+# Config opcional para Render.com (deploy con un click desde el repo)
+services:
+  - type: web
+    name: donaciones-tienda
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: npm start
+    envVars:
+      - key: MP_ACCESS_TOKEN
+        sync: false
+      - key: MP_PUBLIC_KEY
+        sync: false
+      - key: MP_CURRENCY
+        value: MXN
+      - key: BASE_URL
+        sync: false

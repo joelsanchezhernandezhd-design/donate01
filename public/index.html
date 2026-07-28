@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Doná a la tienda</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="card">
+      <header class="header">
+        <div class="badge">Apoyo voluntario</div>
+        <h1>Doná a la tienda</h1>
+        <p class="subtitle">
+          Elegí un monto o escribí el tuyo. El pago se procesa de forma segura
+          con Mercado Pago.
+        </p>
+      </header>
+
+      <form id="donation-form" novalidate>
+        <label class="field-label">Monto de la donación</label>
+        <div class="amounts" role="group" aria-label="Montos sugeridos">
+          <button type="button" class="amount-btn" data-amount="500">
+            $500
+          </button>
+          <button type="button" class="amount-btn" data-amount="1000">
+            $1.000
+          </button>
+          <button type="button" class="amount-btn" data-amount="2500">
+            $2.500
+          </button>
+          <button type="button" class="amount-btn" data-amount="5000">
+            $5.000
+          </button>
+          <button type="button" class="amount-btn" data-amount="10000">
+            $10.000
+          </button>
+        </div>
+
+        <div class="custom-amount">
+          <span class="currency-prefix" id="currency-prefix">$</span>
+          <input
+            type="number"
+            id="amount"
+            name="amount"
+            min="1"
+            step="1"
+            placeholder="Otro monto"
+            inputmode="numeric"
+            required
+          />
+        </div>
+
+        <div class="optional-fields">
+          <label class="field-label" for="name">
+            Tu nombre <span class="optional">(opcional)</span>
+          </label>
+          <input
+            type="text"
+            id="name"
+            name="name"
+            maxlength="80"
+            placeholder="Cómo querés figurar"
+            autocomplete="name"
+          />
+
+          <label class="field-label" for="message">
+            Mensaje <span class="optional">(opcional)</span>
+          </label>
+          <textarea
+            id="message"
+            name="message"
+            maxlength="200"
+            rows="2"
+            placeholder="Un saludo o motivo de la donación"
+          ></textarea>
+        </div>
+
+        <p class="summary">
+          Vas a donar
+          <strong id="summary-amount">—</strong>
+          <span id="summary-currency"></span>
+        </p>
+
+        <button type="submit" class="donate-btn" id="submit-btn">
+          Donar con Mercado Pago
+        </button>
+
+        <p id="error" class="error" hidden></p>
+        <p class="hint">
+          Serás redirigido a Mercado Pago para completar el pago. No se guarda
+          tu tarjeta en este sitio.
+        </p>
+      </form>
+
+      <footer class="footer">
+        <span>Powered by</span>
+        <strong>Mercado Pago</strong>
+      </footer>
+    </main>
+
+    <script src="app.js"></script>
+  </body>
+</html>
