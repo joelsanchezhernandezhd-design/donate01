@@ -464,48 +464,47 @@
               body: JSON.stringify(payload),
             })
               .then(async (response) => {
+                // RAW exacto del body HTTP (sin reformatear)
                 const rawText = await response.text();
+                log(
+                  response.ok ? "info" : "error",
+                  "process-payment RAW body",
+                  {
+                    httpStatus: response.status,
+                    ok: response.ok,
+                    contentType: response.headers.get("content-type"),
+                    rawText: rawText,
+                  }
+                );
+                // Mostrar SIEMPRE el raw en la caja roja
+                setLastPaymentError(
+                  `HTTP ${response.status}\n` + (rawText || "(body vacío)")
+                );
+
                 let data = {};
                 try {
                   data = rawText ? JSON.parse(rawText) : {};
                 } catch {
-                  data = { raw: rawText.slice(0, 2000) };
+                  data = { _parse_error: true, rawText };
                 }
-                log(
-                  response.ok ? "info" : "error",
-                  "process-payment response",
-                  {
-                    httpStatus: response.status,
-                    ok: response.ok,
-                    data,
-                  }
-                );
-                if (response.status === 401) {
-                  setLastPaymentError(
-                    "Sesión expirada (401). Volvé a iniciar sesión."
-                  );
-                  // delay para que el log se guarde antes de ir al login
+
+                // 401 de NUESTRA sesión (sin body MP) vs 401 de Mercado Pago
+                const isOurAuth =
+                  response.status === 401 &&
+                  data &&
+                  data.error === "No autenticado. Iniciá sesión." &&
+                  !data.cause &&
+                  !data._raw;
+                if (isOurAuth) {
                   setTimeout(() => {
                     location.href = "/login.html?next=/";
-                  }, 800);
-                  throw new Error("Sesión expirada. Iniciá sesión de nuevo.");
+                  }, 1200);
+                  throw new Error(rawText || "Sesión expirada");
                 }
+
                 if (!response.ok) {
-                  const parts = [
-                    data.error,
-                    data.status_detail,
-                    data.message,
-                    data.detail,
-                  ].filter(Boolean);
-                  if (data.cause) {
-                    parts.push(
-                      "cause: " + JSON.stringify(safeSerialize(data.cause))
-                    );
-                  }
-                  throw new Error(
-                    parts.join(" | ") ||
-                      `Error HTTP ${response.status} al procesar el pago`
-                  );
+                  // Error para el Brick: el raw completo, no un resumen nuestro
+                  throw new Error(rawText || `HTTP ${response.status}`);
                 }
                 return data;
               })
@@ -515,16 +514,13 @@
                 showPaymentResult(data);
               })
               .catch((err) => {
-                log("error", "process-payment failed", {
-                  message: err?.message,
-                  name: err?.name,
-                  stack: err?.stack,
+                const rawMsg = err?.message || String(err);
+                log("error", "process-payment failed (raw)", {
+                  message: rawMsg,
                 });
-                showError(
-                  paymentError,
-                  err.message || "Error al procesar el pago."
-                );
-                // No resolve: el Brick muestra error y deja reintentar
+                // UI: raw, no mensaje inventado
+                showError(paymentError, rawMsg);
+                setLastPaymentError(rawMsg);
                 reject(err);
               });
           });

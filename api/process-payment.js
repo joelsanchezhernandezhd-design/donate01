@@ -184,45 +184,44 @@ module.exports = async function handler(req, res) {
       transaction_amount: result.transaction_amount,
     });
   } catch (err) {
-    console.error("[process-payment] error", {
-      message: err?.message,
-      status: err?.status,
-      cause: err?.cause,
-      name: err?.name,
-    });
-    const mpCause = err?.cause;
-    let detail = err?.message || "No se pudo procesar el pago.";
-    let statusDetail = null;
-    if (Array.isArray(mpCause) && mpCause[0]) {
-      detail =
-        mpCause[0].description ||
-        mpCause[0].message ||
-        mpCause[0].code ||
-        detail;
-      statusDetail = mpCause[0].code || null;
-    } else if (mpCause?.message) {
-      detail = mpCause.message;
-    }
+    // Respuesta RAW de Mercado Pago / SDK (sin reescribir el mensaje)
+    const raw = {
+      message: err?.message ?? null,
+      error: err?.error ?? null,
+      status: err?.status ?? null,
+      cause: err?.cause ?? null,
+      // campos extra que a veces trae el SDK
+      id: err?.id ?? null,
+      name: err?.name ?? null,
+      api_response: err?.apiResponse ?? err?.api_response ?? null,
+      // por si el SDK anida el body original
+      response: err?.response ?? null,
+      // todo lo enumerable del error (para no perder nada)
+      full: (() => {
+        try {
+          return JSON.parse(
+            JSON.stringify(err, Object.getOwnPropertyNames(err))
+          );
+        } catch {
+          return {
+            message: String(err?.message || err),
+            status: err?.status,
+            cause: err?.cause,
+          };
+        }
+      })(),
+    };
 
-    // Mensajes claros de errores típicos de Mercado Pago (vienen de su API, no de lógica nuestra)
-    const code = Number(statusDetail || err?.status);
-    if (
-      code === 7 ||
-      /Unauthorized use of live credentials/i.test(String(detail))
-    ) {
-      detail =
-        "Mercado Pago rechazó las credenciales de producción (código 7: Unauthorized use of live credentials). " +
-        "Causas comunes: 1) Public Key y Access Token de apps distintas, 2) una clave TEST- y otra APP_USR-, " +
-        "3) la aplicación en el panel aún no tiene cobros productivos habilitados, 4) token revocado. " +
-        "Solución: panel MP → tu app → Credenciales → Producción → copiá de nuevo ambas claves de la MISMA app y actualizá Vercel + Redeploy.";
-    }
+    console.error(
+      "[process-payment] RAW MP ERROR\n" + JSON.stringify(raw, null, 2)
+    );
 
     if (user && amount != null) {
       try {
         await insertDonation({
           payment_id: null,
           status: "error",
-          status_detail: String(detail).slice(0, 250),
+          status_detail: String(raw.message || "error").slice(0, 250),
           amount,
           currency: process.env.MP_CURRENCY || "MXN",
           payment_method_id: paymentBody?.payment_method_id || null,
@@ -232,23 +231,28 @@ module.exports = async function handler(req, res) {
           external_reference: externalRef,
           user_id: user.id,
           username: user.username,
-          raw_json: JSON.stringify({
-            error: detail,
-            cause: mpCause || null,
-            message: err?.message || null,
-          }),
+          raw_json: JSON.stringify(raw),
         });
       } catch (dbErr) {
         console.error("[process-payment] save error donation failed", dbErr);
       }
     }
 
-    res.status(err?.status && err.status >= 400 ? err.status : 500).json({
-      error: detail,
-      status_detail: statusDetail,
-      status: err?.status || null,
-      cause: mpCause || null,
-      message: err?.message || null,
+    const httpStatus =
+      err?.status && err.status >= 400 && err.status < 600 ? err.status : 500;
+
+    // Devolver el body lo más fiel posible a lo que mandó MP
+    res.status(httpStatus).json({
+      // capa mínima nuestra solo para que el front sepa que es raw
+      _raw: true,
+      // eco del error de MP/SDK sin reescribir textos
+      message: raw.message,
+      error: raw.error || raw.message,
+      status: raw.status,
+      cause: raw.cause,
+      api_response: raw.api_response,
+      response: raw.response,
+      full: raw.full,
     });
   }
 };
