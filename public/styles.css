@@ -329,6 +329,55 @@ h1 {
   word-break: break-all;
 }
 
+.debug-log {
+  margin-top: 18px;
+  border: 1px dashed var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  background: #0d1218;
+}
+
+.debug-log summary {
+  cursor: pointer;
+  font-size: 0.85rem;
+  font-weight: 600;
+  color: var(--muted);
+  user-select: none;
+}
+
+.debug-log-actions {
+  display: flex;
+  gap: 8px;
+  margin: 10px 0 8px;
+}
+
+.debug-log-actions button {
+  appearance: none;
+  border: 1px solid var(--border);
+  background: #121820;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.8rem;
+  padding: 6px 10px;
+  border-radius: 8px;
+  cursor: pointer;
+}
+
+.debug-log-actions button:hover {
+  border-color: var(--accent);
+}
+
+#debug-log-body {
+  margin: 0;
+  max-height: 280px;
+  overflow: auto;
+  font-size: 0.72rem;
+  line-height: 1.35;
+  color: #b8c4d0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Result pages */
 .result {
   text-align: center;

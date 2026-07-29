@@ -5,6 +5,7 @@
   "rewrites": [
     { "source": "/api/config", "destination": "/api/config" },
     { "source": "/api/process-payment", "destination": "/api/process-payment" },
-    { "source": "/api/diagnose", "destination": "/api/diagnose" }
+    { "source": "/api/diagnose", "destination": "/api/diagnose" },
+    { "source": "/api/log", "destination": "/api/log" }
   ]
 }

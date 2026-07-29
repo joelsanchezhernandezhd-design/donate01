@@ -125,6 +125,16 @@
         <strong>Mercado Pago</strong>
         <span id="mode-label" class="mode-label"></span>
       </footer>
+
+      <!-- Panel de logs (para depurar empty_installments / BIN) -->
+      <details id="debug-log" class="debug-log" open>
+        <summary>Debug logs (copiá y enviá si hay error)</summary>
+        <div class="debug-log-actions">
+          <button type="button" id="debug-log-copy">Copiar logs</button>
+          <button type="button" id="debug-log-clear">Limpiar</button>
+        </div>
+        <pre id="debug-log-body"></pre>
+      </details>
     </main>
 
     <script src="app.js"></script>

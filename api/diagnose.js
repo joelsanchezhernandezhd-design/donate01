@@ -161,9 +161,23 @@ module.exports = async function handler(req, res) {
     report.ok = false;
   }
 
+  const nick = report.user?.nickname || "";
+  const email = report.user?.email || "";
+  if (
+    /TESTUSER/i.test(nick) ||
+    /testuser/i.test(String(email)) ||
+    /testuser\.com/i.test(String(email))
+  ) {
+    report.ok = false;
+    report.isTestUserAccount = true;
+    report.tips.unshift(
+      "CRÍTICO: estas claves son de un USUARIO DE PRUEBA (TESTUSER… / @testuser.com), NO de tu cuenta vendedora real. El Brick en 'producción' de un test user NO procesa tarjetas reales bien → empty_installments y error de BIN. Solución: en el panel de MP entrá con TU cuenta real → Tus integraciones → tu app → Credenciales → Producción → copiá Public Key y Access Token de ESA cuenta (no de cuentas de prueba)."
+    );
+  }
+
   if (report.ok && report.tips.length === 0) {
     report.tips.push(
-      "Credenciales OK. Si el Brick sigue fallando: 1) usá una tarjeta real válida (no números inventados), 2) monto ≥ $10–$20 MXN, 3) cuenta con cobros online activos."
+      "Credenciales OK (cuenta real). Si el Brick sigue fallando: tarjeta real válida, monto ≥ $20 MXN."
     );
   }
 

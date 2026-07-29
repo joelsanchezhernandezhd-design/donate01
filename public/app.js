@@ -16,15 +16,109 @@
   const payAmountLabel = document.getElementById("pay-amount-label");
   const envBadge = document.getElementById("env-badge");
   const modeLabel = document.getElementById("mode-label");
+  const logPanel = document.getElementById("debug-log");
+  const logBody = document.getElementById("debug-log-body");
+  const logCopyBtn = document.getElementById("debug-log-copy");
+  const logClearBtn = document.getElementById("debug-log-clear");
   const amountButtons = document.querySelectorAll(".amount-btn");
 
   let currency = "MXN";
   let publicKey = "";
   let locale = "es-MX";
   let isSandbox = false;
-  let bricksBuilder = null;
   let paymentBrickController = null;
   let currentAmount = 0;
+  const logEntries = [];
+  const sessionId =
+    "sess_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+
+  /** Serializa sin reventar por ciclos / Error */
+  function safeSerialize(value, depth) {
+    const d = depth == null ? 0 : depth;
+    if (d > 6) return "[MaxDepth]";
+    if (value == null) return value;
+    if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+      return value;
+    }
+    if (value instanceof Error) {
+      return {
+        name: value.name,
+        message: value.message,
+        stack: value.stack,
+        cause: value.cause != null ? safeSerialize(value.cause, d + 1) : undefined,
+      };
+    }
+    if (Array.isArray(value)) {
+      return value.slice(0, 50).map((v) => safeSerialize(v, d + 1));
+    }
+    if (typeof value === "object") {
+      const out = {};
+      const keys = Object.keys(value).slice(0, 40);
+      for (const k of keys) {
+        try {
+          // no loguear PAN completo si apareciera
+          if (/card_number|number|security|cvv|password|secret|token/i.test(k) && typeof value[k] === "string" && value[k].length > 8) {
+            out[k] = `[redacted len=${value[k].length}]`;
+          } else {
+            out[k] = safeSerialize(value[k], d + 1);
+          }
+        } catch (e) {
+          out[k] = "[Unserializable]";
+        }
+      }
+      return out;
+    }
+    return String(value);
+  }
+
+  function renderLogPanel() {
+    if (!logBody) return;
+    logBody.textContent = logEntries
+      .map((e) => {
+        const data =
+          e.data !== undefined
+            ? "\n" + JSON.stringify(safeSerialize(e.data), null, 2)
+            : "";
+        return `[${e.time}] ${e.level.toUpperCase()} ${e.msg}${data}`;
+      })
+      .join("\n\n----------------\n\n");
+    logBody.scrollTop = logBody.scrollHeight;
+  }
+
+  function log(level, msg, data) {
+    const entry = {
+      time: new Date().toISOString(),
+      level,
+      msg: String(msg),
+      data: data !== undefined ? safeSerialize(data) : undefined,
+      sessionId,
+    };
+    logEntries.push(entry);
+    if (logEntries.length > 200) logEntries.shift();
+
+    const consoleFn =
+      level === "error"
+        ? console.error
+        : level === "warn"
+          ? console.warn
+          : console.log;
+    if (data !== undefined) consoleFn("[MP-DONATE]", msg, data);
+    else consoleFn("[MP-DONATE]", msg);
+
+    renderLogPanel();
+
+    // También al servidor (logs de Vercel)
+    try {
+      fetch("/api/log", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(entry),
+        keepalive: true,
+      }).catch(() => {});
+    } catch (_) {
+      /* ignore */
+    }
+  }
 
   function formatMoney(value) {
     try {
@@ -57,12 +151,35 @@
   function showError(el, msg) {
     el.hidden = !msg;
     el.textContent = msg || "";
+    if (msg) log("error", "UI error shown", { msg });
   }
 
   function showStep(step) {
     stepAmount.hidden = step !== "amount";
     stepPayment.hidden = step !== "payment";
     stepResult.hidden = step !== "result";
+    log("info", "step → " + step);
+  }
+
+  if (logCopyBtn) {
+    logCopyBtn.addEventListener("click", async () => {
+      const text = logBody ? logBody.textContent : "";
+      try {
+        await navigator.clipboard.writeText(text);
+        logCopyBtn.textContent = "¡Copiado!";
+        setTimeout(() => {
+          logCopyBtn.textContent = "Copiar logs";
+        }, 1500);
+      } catch {
+        log("warn", "No se pudo copiar al portapapeles");
+      }
+    });
+  }
+  if (logClearBtn) {
+    logClearBtn.addEventListener("click", () => {
+      logEntries.length = 0;
+      renderLogPanel();
+    });
   }
 
   amountButtons.forEach((btn) => {
@@ -71,6 +188,7 @@
       setActiveButton(btn.dataset.amount);
       updateSummary();
       showError(amountError, "");
+      log("info", "Monto preset", { amount: btn.dataset.amount });
     });
   });
 
@@ -81,10 +199,13 @@
   });
 
   async function loadConfig() {
+    log("info", "Cargando /api/config…");
     const res = await fetch("/api/config");
+    const cfg = await res.json().catch(() => ({}));
+    log("info", "/api/config response", { status: res.status, cfg: { ...cfg, publicKey: cfg.publicKey ? cfg.publicKey.slice(0, 12) + "…" : null } });
     if (!res.ok) throw new Error("No se pudo cargar la configuración.");
-    const cfg = await res.json();
-    publicKey = cfg.publicKey || "";
+
+    publicKey = (cfg.publicKey || "").trim();
     currency = cfg.currency || "MXN";
     locale = cfg.locale || "es-MX";
     isSandbox = Boolean(cfg.isSandbox);
@@ -107,6 +228,35 @@
       throw new Error("Falta MP_PUBLIC_KEY en las variables de entorno.");
     }
 
+    // Diagnóstico automático
+    try {
+      log("info", "Cargando /api/diagnose…");
+      const dRes = await fetch("/api/diagnose");
+      const diag = await dRes.json();
+      log("info", "/api/diagnose", diag);
+
+      const nick = diag?.user?.nickname || "";
+      const email = diag?.user?.email || "";
+      const isTestUser =
+        /TESTUSER/i.test(nick) ||
+        /testuser\.com/i.test(email) ||
+        /@testuser/i.test(String(email));
+
+      if (isTestUser) {
+        envBadge.hidden = false;
+        envBadge.className = "env-badge warn";
+        envBadge.textContent =
+          "⚠️ Las claves son de un USUARIO DE PRUEBA (TESTUSER), no de tu cuenta real. Por eso falla empty_installments y el BIN de tarjetas reales.";
+        log(
+          "error",
+          "CUENTA TESTUSER DETECTADA — usá credenciales de producción de TU cuenta vendedora real (no de cuenta de prueba)",
+          { nickname: nick, site_id: diag?.user?.site_id, userId: diag?.user?.id }
+        );
+      }
+    } catch (e) {
+      log("warn", "diagnose falló", e);
+    }
+
     updateSummary();
   }
 
@@ -114,8 +264,9 @@
     if (paymentBrickController) {
       try {
         paymentBrickController.unmount();
-      } catch (_) {
-        /* ignore */
+        log("info", "Brick unmounted");
+      } catch (e) {
+        log("warn", "unmount error", e);
       }
       paymentBrickController = null;
     }
@@ -131,100 +282,151 @@
       throw new Error("No cargó el SDK de Mercado Pago. Recargá la página.");
     }
 
-    // Sin "sandbox": con Public Key APP_USR- opera en producción
+    const amountNum = Math.round(Number(amount) * 100) / 100;
+    log("info", "Creando MercadoPago SDK + Payment Brick", {
+      amount: amountNum,
+      locale,
+      publicKeyPrefix: publicKey.slice(0, 12),
+      // Donaciones: 1 sola cuota evita empty_installments en cuentas limitadas
+      installments: { min: 1, max: 1 },
+    });
+
     const mp = new MercadoPago(publicKey, { locale });
+    const bricksBuilder = mp.bricks();
 
-    bricksBuilder = mp.bricks();
-
-    paymentBrickController = await bricksBuilder.create(
-      "payment",
-      "paymentBrick_container",
-      {
-        initialization: {
-          amount: Number(amount),
-        },
-        customization: {
-          visual: {
-            style: {
-              theme: "default",
-            },
-            texts: {
-              formSubmit: "Donar ahora",
-            },
+    const brickSettings = {
+      initialization: {
+        amount: amountNum,
+      },
+      customization: {
+        visual: {
+          style: {
+            theme: "default",
           },
-          // Incluir prepaid (cambio MP 2025) y tickets MX (OXXO, etc.)
-          paymentMethods: {
-            maxInstallments: 12,
-            creditCard: "all",
-            debitCard: "all",
-            prepaidCard: "all",
-            ticket: "all",
-            atm: "all",
+          texts: {
+            formSubmit: "Donar ahora",
           },
         },
-        callbacks: {
-          onReady: () => {
-            /* brick listo */
-          },
-          onError: (error) => {
-            console.error("Payment Brick error:", error);
-            const cause = error?.cause || error?.message || "";
-            const hint =
-              /payment_method|bin|public_key|get_card|get_payment/i.test(
-                String(cause)
-              )
-                ? " Suele ser Public Key incorrecta, claves TEST/PROD mezcladas, o número de tarjeta inválido (no uses números inventados)."
-                : "";
-            showError(
-              paymentError,
-              (error?.message || "Error en el formulario de pago.") + hint
-            );
-          },
-          onSubmit: ({ selectedPaymentMethod, formData }) => {
-            return new Promise((resolve, reject) => {
-              const payload = {
-                formData:
-                  formData != null
-                    ? formData
-                    : { selectedPaymentMethod, formData },
-                selectedPaymentMethod,
-                donorName: nameInput.value.trim(),
-                message: messageInput.value.trim(),
-              };
+        paymentMethods: {
+          // 1 cuota: donaciones; evita empty_installments si no hay planes MSI
+          minInstallments: 1,
+          maxInstallments: 1,
+          creditCard: "all",
+          debitCard: "all",
+          prepaidCard: "all",
+          ticket: "all",
+          atm: "all",
+        },
+      },
+      callbacks: {
+        onReady: () => {
+          log("info", "Brick onReady");
+        },
+        onBinChange: (bin) => {
+          log("info", "Brick onBinChange", {
+            bin: bin ? String(bin).slice(0, 8) : null,
+          });
+        },
+        onError: (error) => {
+          log("error", "Brick onError", safeSerialize(error));
+          const cause = String(error?.cause || error?.message || "");
+          let hint = "";
+          if (/empty_installments/i.test(cause)) {
+            hint =
+              " (empty_installments: MP no devolvió cuotas. Suele pasar con cuenta TESTUSER o monto/tarjeta no soportados. Usá claves de tu cuenta real vendedora.)";
+          } else if (
+            /payment_method|bin|public_key|get_card|get_payment/i.test(cause)
+          ) {
+            hint =
+              " (BIN/medios: tarjeta inválida o cuenta de prueba. No uses números inventados.)";
+          }
+          showError(
+            paymentError,
+            (error?.message || cause || "Error en el formulario de pago.") +
+              hint
+          );
+        },
+        onSubmit: ({ selectedPaymentMethod, formData }, additionalData) => {
+          log("info", "Brick onSubmit", {
+            selectedPaymentMethod,
+            formData: safeSerialize(formData),
+            additionalData: safeSerialize(additionalData),
+          });
 
-              fetch("/api/process-payment", {
-                method: "POST",
-                headers: { "Content-Type": "application/json" },
-                body: JSON.stringify(payload),
-              })
-                .then(async (response) => {
-                  const data = await response.json().catch(() => ({}));
-                  if (!response.ok) {
-                    throw new Error(
-                      data.error || "No se pudo procesar el pago."
-                    );
-                  }
-                  return data;
-                })
-                .then((data) => {
-                  resolve();
-                  showPaymentResult(data);
-                })
-                .catch((err) => {
-                  showError(
-                    paymentError,
-                    err.message || "Error al procesar el pago."
-                  );
-                  reject();
-                });
+          return new Promise((resolve, reject) => {
+            const payload = {
+              formData:
+                formData != null
+                  ? formData
+                  : { selectedPaymentMethod, formData },
+              selectedPaymentMethod,
+              donorName: nameInput.value.trim(),
+              message: messageInput.value.trim(),
+            };
+
+            log("info", "POST /api/process-payment…", {
+              selectedPaymentMethod,
+              hasFormData: formData != null,
+              amount: formData?.transaction_amount,
+              payment_method_id: formData?.payment_method_id,
             });
-          },
+
+            fetch("/api/process-payment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            })
+              .then(async (response) => {
+                const data = await response.json().catch(() => ({}));
+                log(
+                  response.ok ? "info" : "error",
+                  "process-payment response",
+                  { status: response.status, data }
+                );
+                if (!response.ok) {
+                  throw new Error(
+                    data.error || "No se pudo procesar el pago."
+                  );
+                }
+                return data;
+              })
+              .then((data) => {
+                resolve();
+                showPaymentResult(data);
+              })
+              .catch((err) => {
+                log("error", "process-payment failed", err);
+                showError(
+                  paymentError,
+                  err.message || "Error al procesar el pago."
+                );
+                reject();
+              });
+          });
         },
-      }
-    );
+      },
+    };
+
+    log("info", "bricks.create('payment') settings", {
+      initialization: brickSettings.initialization,
+      paymentMethods: brickSettings.customization.paymentMethods,
+    });
+
+    try {
+      paymentBrickController = await bricksBuilder.create(
+        "payment",
+        "paymentBrick_container",
+        brickSettings
+      );
+      log("info", "Brick create() resolved OK");
+    } catch (e) {
+      log("error", "Brick create() threw", e);
+      throw e;
+    }
   }
 
   function showPaymentResult(data) {
+    log("info", "showPaymentResult", data);
     const status = (data.status || "").toLowerCase();
     const icon = document.getElementById("result-icon");
     const title = document.getElementById("result-title");
@@ -277,12 +479,14 @@
     payAmountLabel.textContent = `$${formatMoney(amount)} ${currency}`;
     continueBtn.disabled = true;
     continueBtn.textContent = "Cargando checkout…";
+    log("info", "Continuar al pago", { amount, currency });
 
     try {
       if (!publicKey) await loadConfig();
       showStep("payment");
       await mountPaymentBrick(amount);
     } catch (err) {
+      log("error", "Falló continuar al pago", err);
       showStep("amount");
       showError(amountError, err.message || "No se pudo iniciar el pago.");
     } finally {
@@ -301,12 +505,28 @@
     showStep("amount");
   });
 
-  // default demo
+  // window errors
+  window.addEventListener("error", (ev) => {
+    log("error", "window.error", {
+      message: ev.message,
+      filename: ev.filename,
+      lineno: ev.lineno,
+      colno: ev.colno,
+    });
+  });
+  window.addEventListener("unhandledrejection", (ev) => {
+    log("error", "unhandledrejection", safeSerialize(ev.reason));
+  });
+
   amountInput.value = "100";
   setActiveButton(100);
   updateSummary();
+  if (logPanel) logPanel.hidden = false;
+
+  log("info", "App init", { sessionId, href: location.href, ua: navigator.userAgent });
 
   loadConfig().catch((err) => {
+    log("error", "loadConfig failed", err);
     showError(amountError, err.message || "Error de configuración.");
   });
 })();
