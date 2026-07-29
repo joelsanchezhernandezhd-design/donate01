@@ -18,9 +18,16 @@ module.exports = async function handler(req, res) {
     return;
   }
 
+  let user = null;
+  let amount = null;
+  let donorName = "";
+  let message = "";
+  let externalRef = null;
+  let paymentBody = null;
+
   try {
     await initDb();
-    const user = await requireUser(req, res);
+    user = await requireUser(req, res);
     if (!user) return;
 
     const ACCESS_TOKEN = (process.env.MP_ACCESS_TOKEN || "").trim();
@@ -43,7 +50,10 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    if (formData === null || formData.selectedPaymentMethod === "wallet_purchase") {
+    if (
+      formData === null ||
+      formData.selectedPaymentMethod === "wallet_purchase"
+    ) {
       res.status(400).json({
         error:
           "Para pagar con cuenta Mercado Pago usá tarjeta u otro medio en el formulario.",
@@ -51,32 +61,46 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    const paymentBody =
+    paymentBody =
       formData.formData && formData.selectedPaymentMethod
         ? formData.formData
         : formData;
 
     if (!paymentBody || !paymentBody.transaction_amount) {
-      res.status(400).json({ error: "Datos de pago incompletos." });
+      res.status(400).json({
+        error: "Datos de pago incompletos.",
+        receivedKeys: paymentBody ? Object.keys(paymentBody) : null,
+      });
       return;
     }
 
-    const amount = Number(paymentBody.transaction_amount);
+    amount = Number(paymentBody.transaction_amount);
     if (!Number.isFinite(amount) || amount < 1) {
       res.status(400).json({ error: "Monto inválido." });
       return;
     }
 
-    const donorName = String(req.body?.donorName || "").trim().slice(0, 80);
-    const message = String(req.body?.message || "").trim().slice(0, 200);
-    const externalRef = `donation-${Date.now()}`;
+    donorName = String(req.body?.donorName || "").trim().slice(0, 80);
+    message = String(req.body?.message || "").trim().slice(0, 200);
+    externalRef = `donation-${Date.now()}`;
 
+    // Campos que a veces rompen el create si vienen null raros del Brick
     const body = {
-      ...paymentBody,
+      token: paymentBody.token,
+      issuer_id: paymentBody.issuer_id,
+      payment_method_id: paymentBody.payment_method_id,
       transaction_amount: Math.round(amount * 100) / 100,
+      installments: Number(paymentBody.installments) || 1,
+      payer: paymentBody.payer,
       description: message
-        ? `Donación${donorName ? ` — ${donorName}` : ""}: ${message}`.slice(0, 250)
-        : `Donación a la tienda${donorName ? ` — ${donorName}` : ""}`.slice(0, 250),
+        ? `Donación${donorName ? ` — ${donorName}` : ""}: ${message}`.slice(
+            0,
+            250
+          )
+        : `Donación a la tienda${donorName ? ` — ${donorName}` : ""}`.slice(
+            0,
+            250
+          ),
       external_reference: externalRef,
       metadata: {
         type: "donation",
@@ -87,9 +111,28 @@ module.exports = async function handler(req, res) {
       },
     };
 
+    // Solo incluir opcionales si existen
+    if (paymentBody.payment_method_option_id) {
+      body.payment_method_option_id = paymentBody.payment_method_option_id;
+    }
+    if (paymentBody.processing_mode) {
+      body.processing_mode = paymentBody.processing_mode;
+    }
+
+    console.log("[process-payment] MP create body (sanitized)", {
+      transaction_amount: body.transaction_amount,
+      payment_method_id: body.payment_method_id,
+      installments: body.installments,
+      issuer_id: body.issuer_id,
+      hasToken: Boolean(body.token),
+      tokenLen: body.token ? String(body.token).length : 0,
+      payerEmail: body.payer?.email,
+      external_reference: body.external_reference,
+    });
+
     const client = new MercadoPagoConfig({
       accessToken: ACCESS_TOKEN,
-      options: { timeout: 10000 },
+      options: { timeout: 15000 },
     });
     const payment = new Payment(client);
 
@@ -103,7 +146,6 @@ module.exports = async function handler(req, res) {
       requestOptions: { idempotencyKey },
     });
 
-    // Guardar en DB (panel admin)
     try {
       await insertDonation({
         payment_id: result.id != null ? String(result.id) : null,
@@ -111,8 +153,10 @@ module.exports = async function handler(req, res) {
         status_detail: result.status_detail || null,
         amount: result.transaction_amount ?? amount,
         currency: process.env.MP_CURRENCY || "MXN",
-        payment_method_id: result.payment_method_id || paymentBody.payment_method_id || null,
-        payer_email: result.payer?.email || paymentBody.payer?.email || null,
+        payment_method_id:
+          result.payment_method_id || paymentBody.payment_method_id || null,
+        payer_email:
+          result.payer?.email || paymentBody.payer?.email || null,
         donor_name: donorName || null,
         message: message || null,
         external_reference: externalRef,
@@ -144,18 +188,54 @@ module.exports = async function handler(req, res) {
       message: err?.message,
       status: err?.status,
       cause: err?.cause,
+      name: err?.name,
     });
     const mpCause = err?.cause;
     let detail = err?.message || "No se pudo procesar el pago.";
+    let statusDetail = null;
     if (Array.isArray(mpCause) && mpCause[0]) {
-      detail = mpCause[0].description || mpCause[0].message || detail;
+      detail =
+        mpCause[0].description ||
+        mpCause[0].message ||
+        mpCause[0].code ||
+        detail;
+      statusDetail = mpCause[0].code || null;
     } else if (mpCause?.message) {
       detail = mpCause.message;
     }
-    res.status(err?.status || 500).json({
+
+    if (user && amount != null) {
+      try {
+        await insertDonation({
+          payment_id: null,
+          status: "error",
+          status_detail: String(detail).slice(0, 250),
+          amount,
+          currency: process.env.MP_CURRENCY || "MXN",
+          payment_method_id: paymentBody?.payment_method_id || null,
+          payer_email: paymentBody?.payer?.email || null,
+          donor_name: donorName || null,
+          message: message || null,
+          external_reference: externalRef,
+          user_id: user.id,
+          username: user.username,
+          raw_json: JSON.stringify({
+            error: detail,
+            cause: mpCause || null,
+            message: err?.message || null,
+          }),
+        });
+      } catch (dbErr) {
+        console.error("[process-payment] save error donation failed", dbErr);
+      }
+    }
+
+    res.status(err?.status && err.status >= 400 ? err.status : 500).json({
       error: detail,
+      status_detail: statusDetail,
       status: err?.status || null,
       cause: mpCause || null,
+      message: err?.message || null,
     });
   }
 };

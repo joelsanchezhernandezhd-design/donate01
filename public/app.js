@@ -36,9 +36,72 @@
   // En MX, Visa/BBVA exige min ~$5 en 1 cuota y ~$10 en más cuotas.
   // Con $1 el API trae installments pero el Brick filtra TODO → empty_installments.
   const MIN_AMOUNT = 10;
+  const LOG_KEY = "donate_debug_logs_v1";
+  const ERR_KEY = "donate_last_payment_error_v1";
   const logEntries = [];
+  try {
+    const saved = JSON.parse(localStorage.getItem(LOG_KEY) || "[]");
+    if (Array.isArray(saved)) {
+      saved.slice(-150).forEach((e) => logEntries.push(e));
+    }
+  } catch (_) {
+    /* ignore */
+  }
   const sessionId =
     "sess_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
+
+  const lastPaymentError = document.getElementById("last-payment-error");
+  const lastPaymentErrorBody = document.getElementById("last-payment-error-body");
+  const copyLastErrorBtn = document.getElementById("copy-last-error");
+
+  function persistLogs() {
+    try {
+      localStorage.setItem(LOG_KEY, JSON.stringify(logEntries.slice(-150)));
+    } catch (_) {
+      /* quota */
+    }
+  }
+
+  function setLastPaymentError(text) {
+    const msg = String(text || "").trim();
+    if (!msg) return;
+    try {
+      localStorage.setItem(ERR_KEY, msg);
+    } catch (_) {
+      /* ignore */
+    }
+    if (lastPaymentError && lastPaymentErrorBody) {
+      lastPaymentError.hidden = false;
+      lastPaymentErrorBody.textContent = msg;
+    }
+  }
+
+  function restoreLastPaymentError() {
+    try {
+      const msg = localStorage.getItem(ERR_KEY);
+      if (msg && lastPaymentError && lastPaymentErrorBody) {
+        lastPaymentError.hidden = false;
+        lastPaymentErrorBody.textContent = msg;
+      }
+    } catch (_) {
+      /* ignore */
+    }
+  }
+
+  if (copyLastErrorBtn) {
+    copyLastErrorBtn.addEventListener("click", async () => {
+      const t = lastPaymentErrorBody?.textContent || "";
+      try {
+        await navigator.clipboard.writeText(t);
+        copyLastErrorBtn.textContent = "¡Copiado!";
+        setTimeout(() => {
+          copyLastErrorBtn.textContent = "Copiar error";
+        }, 1500);
+      } catch (_) {
+        /* ignore */
+      }
+    });
+  }
 
   /** Serializa sin reventar por ciclos / Error */
   function safeSerialize(value, depth) {
@@ -103,6 +166,7 @@
     };
     logEntries.push(entry);
     if (logEntries.length > 200) logEntries.shift();
+    persistLogs();
 
     const consoleFn =
       level === "error"
@@ -114,6 +178,15 @@
     else consoleFn("[MP-DONATE]", msg);
 
     renderLogPanel();
+
+    if (level === "error") {
+      const blob =
+        msg +
+        (data !== undefined
+          ? "\n" + JSON.stringify(safeSerialize(data), null, 2)
+          : "");
+      setLastPaymentError(blob);
+    }
 
     // También al servidor (logs de Vercel)
     try {
@@ -186,9 +259,20 @@
   if (logClearBtn) {
     logClearBtn.addEventListener("click", () => {
       logEntries.length = 0;
+      persistLogs();
+      try {
+        localStorage.removeItem(ERR_KEY);
+      } catch (_) {
+        /* ignore */
+      }
+      if (lastPaymentError) lastPaymentError.hidden = true;
       renderLogPanel();
     });
   }
+
+  // Restaurar panel de logs al cargar
+  renderLogPanel();
+  restoreLastPaymentError();
 
   amountButtons.forEach((btn) => {
     btn.addEventListener("click", () => {
@@ -379,6 +463,8 @@
               hasFormData: formData != null,
               amount: formData?.transaction_amount,
               payment_method_id: formData?.payment_method_id,
+              installments: formData?.installments,
+              hasToken: Boolean(formData?.token),
             });
 
             fetch("/api/process-payment", {
@@ -388,34 +474,68 @@
               body: JSON.stringify(payload),
             })
               .then(async (response) => {
-                const data = await response.json().catch(() => ({}));
+                const rawText = await response.text();
+                let data = {};
+                try {
+                  data = rawText ? JSON.parse(rawText) : {};
+                } catch {
+                  data = { raw: rawText.slice(0, 2000) };
+                }
                 log(
                   response.ok ? "info" : "error",
                   "process-payment response",
-                  { status: response.status, data }
+                  {
+                    httpStatus: response.status,
+                    ok: response.ok,
+                    data,
+                  }
                 );
                 if (response.status === 401) {
-                  location.href = "/login.html?next=/";
+                  setLastPaymentError(
+                    "Sesión expirada (401). Volvé a iniciar sesión."
+                  );
+                  // delay para que el log se guarde antes de ir al login
+                  setTimeout(() => {
+                    location.href = "/login.html?next=/";
+                  }, 800);
                   throw new Error("Sesión expirada. Iniciá sesión de nuevo.");
                 }
                 if (!response.ok) {
+                  const parts = [
+                    data.error,
+                    data.status_detail,
+                    data.message,
+                    data.detail,
+                  ].filter(Boolean);
+                  if (data.cause) {
+                    parts.push(
+                      "cause: " + JSON.stringify(safeSerialize(data.cause))
+                    );
+                  }
                   throw new Error(
-                    data.error || "No se pudo procesar el pago."
+                    parts.join(" | ") ||
+                      `Error HTTP ${response.status} al procesar el pago`
                   );
                 }
                 return data;
               })
               .then((data) => {
+                log("info", "Pago procesado por API", data);
                 resolve();
                 showPaymentResult(data);
               })
               .catch((err) => {
-                log("error", "process-payment failed", err);
+                log("error", "process-payment failed", {
+                  message: err?.message,
+                  name: err?.name,
+                  stack: err?.stack,
+                });
                 showError(
                   paymentError,
                   err.message || "Error al procesar el pago."
                 );
-                reject();
+                // No resolve: el Brick muestra error y deja reintentar
+                reject(err);
               });
           });
         },
