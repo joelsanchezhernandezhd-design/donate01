@@ -33,6 +33,9 @@
   let paymentBrickController = null;
   let currentAmount = 0;
   let currentUser = null;
+  // En MX, Visa/BBVA exige min ~$5 en 1 cuota y ~$10 en más cuotas.
+  // Con $1 el API trae installments pero el Brick filtra TODO → empty_installments.
+  const MIN_AMOUNT = 10;
   const logEntries = [];
   const sessionId =
     "sess_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
@@ -292,8 +295,8 @@
       amount: amountNum,
       locale,
       publicKeyPrefix: publicKey.slice(0, 12),
-      // Donaciones: 1 sola cuota evita empty_installments en cuentas limitadas
-      installments: { min: 1, max: 1 },
+      minAmount: MIN_AMOUNT,
+      installments: { min: 1, max: 12 },
     });
 
     const mp = new MercadoPago(publicKey, { locale });
@@ -313,9 +316,9 @@
           },
         },
         paymentMethods: {
-          // 1 cuota: donaciones; evita empty_installments si no hay planes MSI
+          // Debe haber al menos 1 plan válido para el monto (min MP suele ser $5–$10)
           minInstallments: 1,
-          maxInstallments: 1,
+          maxInstallments: 12,
           creditCard: "all",
           debitCard: "all",
           prepaidCard: "all",
@@ -330,6 +333,7 @@
         onBinChange: (bin) => {
           log("info", "Brick onBinChange", {
             bin: bin ? String(bin).slice(0, 8) : null,
+            amount: amountNum,
           });
         },
         onError: (error) => {
@@ -338,7 +342,7 @@
           let hint = "";
           if (/empty_installments/i.test(cause)) {
             hint =
-              " (empty_installments: MP no devolvió cuotas. Suele pasar con cuenta TESTUSER o monto/tarjeta no soportados. Usá claves de tu cuenta real vendedora.)";
+              " (empty_installments: el monto es menor al mínimo de la tarjeta o la cuenta es TESTUSER. Probá $10 o más. En Network el API puede mostrar cuotas, pero con min_allowed_amount el Brick las descarta.)";
           } else if (
             /payment_method|bin|public_key|get_card|get_payment/i.test(cause)
           ) {
@@ -479,8 +483,11 @@
   continueBtn.addEventListener("click", async () => {
     showError(amountError, "");
     const amount = Number(amountInput.value);
-    if (!Number.isFinite(amount) || amount < 1) {
-      showError(amountError, "Elegí o escribí un monto válido.");
+    if (!Number.isFinite(amount) || amount < MIN_AMOUNT) {
+      showError(
+        amountError,
+        `El monto mínimo es $${MIN_AMOUNT} ${currency} (Mercado Pago no ofrece cuotas por debajo de eso).`
+      );
       amountInput.focus();
       return;
     }
