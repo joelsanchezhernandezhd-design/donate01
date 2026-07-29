@@ -9,6 +9,9 @@
   const refreshBtn = document.getElementById("refresh-btn");
   const logoutBtn = document.getElementById("logout-btn");
 
+  if (adminUser) adminUser.textContent = "público (sin login)";
+  if (logoutBtn) logoutBtn.hidden = true;
+
   function showError(msg) {
     errorEl.hidden = !msg;
     errorEl.textContent = msg || "";
@@ -30,7 +33,7 @@
     let cls = "other";
     if (s === "approved") cls = "approved";
     else if (s === "pending" || s === "in_process") cls = "pending";
-    else if (s === "rejected") cls = "rejected";
+    else if (s === "rejected" || s === "error") cls = "rejected";
     return `<span class="badge-status ${cls}">${status || "—"}</span>`;
   }
 
@@ -42,35 +45,13 @@
       .replace(/"/g, "&quot;");
   }
 
-  async function ensureAdmin() {
-    const res = await fetch("/api/auth/me", { credentials: "include" });
-    const data = await res.json().catch(() => ({}));
-    if (!data.authenticated) {
-      location.replace("/login.html?next=/admin.html");
-      return null;
-    }
-    if (data.user?.role !== "admin") {
-      showError("Tu usuario no es administrador.");
-      loading.hidden = true;
-      return null;
-    }
-    adminUser.textContent = data.user.username;
-    return data.user;
-  }
-
   async function loadDonations() {
     showError("");
     loading.hidden = false;
     loading.textContent = "Cargando donaciones…";
     try {
-      const res = await fetch("/api/admin/donations?limit=200", {
-        credentials: "include",
-      });
+      const res = await fetch("/api/admin/donations?limit=200");
       const data = await res.json().catch(() => ({}));
-      if (res.status === 401 || res.status === 403) {
-        location.replace("/login.html?next=/admin.html");
-        return;
-      }
       if (!res.ok) throw new Error(data.error || "Error al cargar");
 
       statCount.textContent = String(data.totalCount ?? 0);
@@ -107,16 +88,6 @@
     }
   }
 
-  refreshBtn.addEventListener("click", loadDonations);
-  logoutBtn.addEventListener("click", async () => {
-    await fetch("/api/auth/logout", {
-      method: "POST",
-      credentials: "include",
-    });
-    location.href = "/login.html";
-  });
-
-  ensureAdmin().then((u) => {
-    if (u) loadDonations();
-  });
+  if (refreshBtn) refreshBtn.addEventListener("click", loadDonations);
+  loadDonations();
 })();

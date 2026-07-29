@@ -21,18 +21,12 @@
   const logCopyBtn = document.getElementById("debug-log-copy");
   const logClearBtn = document.getElementById("debug-log-clear");
   const amountButtons = document.querySelectorAll(".amount-btn");
-  const userBar = document.getElementById("user-bar");
-  const userNameEl = document.getElementById("user-name");
-  const adminLink = document.getElementById("admin-link");
-  const logoutLink = document.getElementById("logout-link");
-
   let currency = "MXN";
   let publicKey = "";
   let locale = "es-MX";
   let isSandbox = false;
   let paymentBrickController = null;
   let currentAmount = 0;
-  let currentUser = null;
   // En MX, Visa/BBVA exige min ~$5 en 1 cuota y ~$10 en más cuotas.
   // Con $1 el API trae installments pero el Brick filtra TODO → empty_installments.
   const MIN_AMOUNT = 10;
@@ -448,60 +442,34 @@
               message: messageInput.value.trim(),
             };
 
-            log("info", "POST /api/p (sealed)…", {
+            log("info", "POST /api/process-payment…", {
               selectedPaymentMethod,
               hasFormData: formData != null,
               amount: formData?.transaction_amount,
               hasToken: Boolean(formData?.token),
-              wire: Boolean(window.DonateWire?.getWireKey?.()),
             });
 
-            const send =
-              window.DonateWire && window.DonateWire.getWireKey()
-                ? window.DonateWire.postSealed("/api/p", payload)
-                : fetch("/api/p", {
-                    method: "POST",
-                    credentials: "include",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify(payload),
-                  }).then(async (res) => {
-                    const rawText = await res.text();
-                    let data = {};
-                    try {
-                      data = rawText ? JSON.parse(rawText) : {};
-                    } catch {
-                      data = { rawText };
-                    }
-                    return { res, rawText, data };
-                  });
-
-            send
-              .then(({ res, rawText, data }) => {
-                // En Network el body del request es {v,d}; acá logueamos respuesta ya abierta (solo debug local)
+            fetch("/api/process-payment", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify(payload),
+            })
+              .then(async (res) => {
+                const rawText = await res.text();
+                let data = {};
+                try {
+                  data = rawText ? JSON.parse(rawText) : {};
+                } catch {
+                  data = { rawText };
+                }
                 log(res.ok ? "info" : "error", "payment API result", {
                   httpStatus: res.status,
-                  // raw de red (puede ser {v,d} cifrado)
-                  networkBody: rawText?.slice?.(0, 500),
-                  // descifrado si aplica
                   data,
                 });
                 setLastPaymentError(
                   `HTTP ${res.status}\n` +
                     JSON.stringify(data, null, 2).slice(0, 4000)
                 );
-
-                const isOurAuth =
-                  res.status === 401 &&
-                  data &&
-                  data.error === "No autenticado. Iniciá sesión." &&
-                  !data.cause &&
-                  !data._raw;
-                if (isOurAuth) {
-                  setTimeout(() => {
-                    location.href = "/login.html?next=/";
-                  }, 1200);
-                  throw new Error(JSON.stringify(data));
-                }
                 if (!res.ok) {
                   throw new Error(JSON.stringify(data));
                 }
@@ -648,51 +616,9 @@
 
   log("info", "App init", { sessionId, href: location.href, ua: navigator.userAgent });
 
-  async function requireLogin() {
-    try {
-      const res = await fetch("/api/auth/me", { credentials: "include" });
-      const data = await res.json().catch(() => ({}));
-      if (!data.authenticated || !data.user) {
-        location.replace("/login.html?next=/");
-        return false;
-      }
-      currentUser = data.user;
-      if (data.k && window.DonateWire) {
-        window.DonateWire.setWireKey(data.k);
-      }
-      if (userBar) userBar.hidden = false;
-      if (userNameEl) userNameEl.textContent = data.user.username;
-      if (adminLink && data.user.role === "admin") adminLink.hidden = false;
-      log("info", "Usuario autenticado", {
-        username: data.user.username,
-        role: data.user.role,
-        hasWireKey: Boolean(data.k),
-      });
-      return true;
-    } catch (e) {
-      log("error", "auth/me failed", e);
-      location.replace("/login.html?next=/");
-      return false;
-    }
-  }
-
-  if (logoutLink) {
-    logoutLink.addEventListener("click", async () => {
-      if (window.DonateWire) window.DonateWire.clearWireKey();
-      await fetch("/api/auth/logout", {
-        method: "POST",
-        credentials: "include",
-      });
-      location.href = "/login.html";
-    });
-  }
-
-  requireLogin().then((ok) => {
-    if (!ok) return;
-    loadConfig().catch((err) => {
-      log("error", "loadConfig failed", err);
-      showError(amountError, err.message || "Error de configuración.");
-    });
+  loadConfig().catch((err) => {
+    log("error", "loadConfig failed", err);
+    showError(amountError, err.message || "Error de configuración.");
   });
 })();
 
