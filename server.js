@@ -2,20 +2,16 @@ require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const path = require("path");
-const crypto = require("crypto");
-const { MercadoPagoConfig, Payment } = require("mercadopago");
-const { initDb, insertDonation, listDonations } = require("./lib/db");
+const { initDb, listDonations } = require("./lib/db");
 const {
   login,
   getSessionUser,
-  requireUser,
   requireAdmin,
   sessionCookie,
 } = require("./lib/auth");
 
 const app = express();
 const PORT = process.env.PORT || 3000;
-const ACCESS_TOKEN = (process.env.MP_ACCESS_TOKEN || "").trim();
 const PUBLIC_KEY = (process.env.MP_PUBLIC_KEY || "").trim();
 const CURRENCY = process.env.MP_CURRENCY || "MXN";
 const LOCALE = process.env.MP_LOCALE || "es-MX";
