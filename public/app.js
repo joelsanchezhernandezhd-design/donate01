@@ -296,7 +296,8 @@
       locale,
       publicKeyPrefix: publicKey.slice(0, 12),
       minAmount: MIN_AMOUNT,
-      installments: { min: 1, max: 12 },
+      // Solo 1 pago (sin MSI / sin varias cuotas)
+      installments: { min: 1, max: 1 },
     });
 
     const mp = new MercadoPago(publicKey, { locale });
@@ -316,9 +317,9 @@
           },
         },
         paymentMethods: {
-          // Debe haber al menos 1 plan válido para el monto (min MP suele ser $5–$10)
+          // Un solo plazo: pago de contado (donaciones)
           minInstallments: 1,
-          maxInstallments: 12,
+          maxInstallments: 1,
           creditCard: "all",
           debitCard: "all",
           prepaidCard: "all",
