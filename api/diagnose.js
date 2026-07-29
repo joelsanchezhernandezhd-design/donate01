@@ -161,23 +161,21 @@ module.exports = async function handler(req, res) {
     report.ok = false;
   }
 
+  // Info solamente (no marca error ni bloquea pagos)
   const nick = report.user?.nickname || "";
   const email = report.user?.email || "";
-  if (
-    /TESTUSER/i.test(nick) ||
-    /testuser/i.test(String(email)) ||
-    /testuser\.com/i.test(String(email))
-  ) {
-    report.ok = false;
-    report.isTestUserAccount = true;
-    report.tips.unshift(
-      "CRÍTICO: estas claves son de un USUARIO DE PRUEBA (TESTUSER… / @testuser.com), NO de tu cuenta vendedora real. El Brick en 'producción' de un test user NO procesa tarjetas reales bien → empty_installments y error de BIN. Solución: en el panel de MP entrá con TU cuenta real → Tus integraciones → tu app → Credenciales → Producción → copiá Public Key y Access Token de ESA cuenta (no de cuentas de prueba)."
+  report.looksLikeTestUser = Boolean(
+    /TESTUSER/i.test(nick) || /testuser/i.test(String(email))
+  );
+  if (report.looksLikeTestUser) {
+    report.tips.push(
+      "Info: el token responde como cuenta con nickname de prueba. Si cobros fallan con código 7, usá Public Key + Access Token de Producción de la misma app de tu cuenta vendedora real."
     );
   }
 
   if (report.ok && report.tips.length === 0) {
     report.tips.push(
-      "Credenciales OK (cuenta real). Si el Brick sigue fallando: tarjeta real válida, monto ≥ $20 MXN."
+      "Credenciales responden OK. Si el pago falla: revisá error de MP (ej. código 7 = credenciales live no autorizadas / mezcla TEST-PROD)."
     );
   }
 

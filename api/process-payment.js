@@ -204,6 +204,19 @@ module.exports = async function handler(req, res) {
       detail = mpCause.message;
     }
 
+    // Mensajes claros de errores típicos de Mercado Pago (vienen de su API, no de lógica nuestra)
+    const code = Number(statusDetail || err?.status);
+    if (
+      code === 7 ||
+      /Unauthorized use of live credentials/i.test(String(detail))
+    ) {
+      detail =
+        "Mercado Pago rechazó las credenciales de producción (código 7: Unauthorized use of live credentials). " +
+        "Causas comunes: 1) Public Key y Access Token de apps distintas, 2) una clave TEST- y otra APP_USR-, " +
+        "3) la aplicación en el panel aún no tiene cobros productivos habilitados, 4) token revocado. " +
+        "Solución: panel MP → tu app → Credenciales → Producción → copiá de nuevo ambas claves de la MISMA app y actualizá Vercel + Redeploy.";
+    }
+
     if (user && amount != null) {
       try {
         await insertDonation({

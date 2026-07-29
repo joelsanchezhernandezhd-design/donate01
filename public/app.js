@@ -327,23 +327,13 @@
       const diag = await dRes.json();
       log("info", "/api/diagnose", diag);
 
+      // Solo log informativo (no bloquea ni muestra error al usuario)
       const nick = diag?.user?.nickname || "";
-      const email = diag?.user?.email || "";
-      const isTestUser =
-        /TESTUSER/i.test(nick) ||
-        /testuser\.com/i.test(email) ||
-        /@testuser/i.test(String(email));
-
-      if (isTestUser) {
-        envBadge.hidden = false;
-        envBadge.className = "env-badge warn";
-        envBadge.textContent =
-          "⚠️ Las claves son de un USUARIO DE PRUEBA (TESTUSER), no de tu cuenta real. Por eso falla empty_installments y el BIN de tarjetas reales.";
-        log(
-          "error",
-          "CUENTA TESTUSER DETECTADA — usá credenciales de producción de TU cuenta vendedora real (no de cuenta de prueba)",
-          { nickname: nick, site_id: diag?.user?.site_id, userId: diag?.user?.id }
-        );
+      if (/TESTUSER/i.test(nick)) {
+        log("info", "diagnose: nickname parece test user", {
+          nickname: nick,
+          site_id: diag?.user?.site_id,
+        });
       }
     } catch (e) {
       log("warn", "diagnose falló", e);
