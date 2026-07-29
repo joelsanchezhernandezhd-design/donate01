@@ -1,8 +1,10 @@
 const { MercadoPagoConfig, Payment } = require("mercadopago");
 const crypto = require("crypto");
+const { requireUser } = require("../lib/auth");
+const { initDb, insertDonation } = require("../lib/db");
 
 module.exports = async function handler(req, res) {
-  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Credentials", "true");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
@@ -17,11 +19,14 @@ module.exports = async function handler(req, res) {
   }
 
   try {
+    await initDb();
+    const user = await requireUser(req, res);
+    if (!user) return;
+
     const ACCESS_TOKEN = (process.env.MP_ACCESS_TOKEN || "").trim();
     console.log("[process-payment] start", {
+      user: user.username,
       hasToken: Boolean(ACCESS_TOKEN),
-      tokenPrefix: ACCESS_TOKEN.slice(0, 8),
-      bodyKeys: req.body ? Object.keys(req.body) : [],
       selectedPaymentMethod: req.body?.selectedPaymentMethod,
     });
 
@@ -32,33 +37,26 @@ module.exports = async function handler(req, res) {
       return;
     }
 
-    // formData viene del Payment Brick (Checkout Bricks)
     const formData = req.body?.formData ?? req.body;
     if (!formData || typeof formData !== "object") {
-      console.error("[process-payment] missing formData");
       res.status(400).json({ error: "Faltan datos del pago." });
       return;
     }
 
-    // wallet_purchase del Brick a veces manda formData null (usa preference)
     if (formData === null || formData.selectedPaymentMethod === "wallet_purchase") {
       res.status(400).json({
         error:
-          "Para pagar con cuenta Mercado Pago usá tarjeta u otro medio en el formulario, o contactá soporte para Wallet.",
+          "Para pagar con cuenta Mercado Pago usá tarjeta u otro medio en el formulario.",
       });
       return;
     }
 
-    // El Brick envuelve a veces: { selectedPaymentMethod, formData }
     const paymentBody =
       formData.formData && formData.selectedPaymentMethod
         ? formData.formData
         : formData;
 
     if (!paymentBody || !paymentBody.transaction_amount) {
-      console.error("[process-payment] incomplete paymentBody", {
-        keys: paymentBody ? Object.keys(paymentBody) : null,
-      });
       res.status(400).json({ error: "Datos de pago incompletos." });
       return;
     }
@@ -71,6 +69,7 @@ module.exports = async function handler(req, res) {
 
     const donorName = String(req.body?.donorName || "").trim().slice(0, 80);
     const message = String(req.body?.message || "").trim().slice(0, 200);
+    const externalRef = `donation-${Date.now()}`;
 
     const body = {
       ...paymentBody,
@@ -78,27 +77,16 @@ module.exports = async function handler(req, res) {
       description: message
         ? `Donación${donorName ? ` — ${donorName}` : ""}: ${message}`.slice(0, 250)
         : `Donación a la tienda${donorName ? ` — ${donorName}` : ""}`.slice(0, 250),
-      external_reference: `donation-${Date.now()}`,
+      external_reference: externalRef,
       metadata: {
         type: "donation",
         donor_name: donorName || null,
         message: message || null,
+        app_user: user.username,
+        app_user_id: user.id,
       },
     };
 
-    console.log("[process-payment] MP create body (sanitized)", {
-      transaction_amount: body.transaction_amount,
-      payment_method_id: body.payment_method_id,
-      installments: body.installments,
-      issuer_id: body.issuer_id,
-      hasToken: Boolean(body.token),
-      tokenLen: body.token ? String(body.token).length : 0,
-      payerEmail: body.payer?.email,
-      description: body.description,
-      external_reference: body.external_reference,
-    });
-
-    // Producción: Access Token APP_USR-... (nunca TEST-)
     const client = new MercadoPagoConfig({
       accessToken: ACCESS_TOKEN,
       options: { timeout: 10000 },
@@ -115,13 +103,34 @@ module.exports = async function handler(req, res) {
       requestOptions: { idempotencyKey },
     });
 
-    console.log("[process-payment] MP result", {
-      id: result.id,
-      status: result.status,
-      status_detail: result.status_detail,
-      payment_method_id: result.payment_method_id,
-      transaction_amount: result.transaction_amount,
-    });
+    // Guardar en DB (panel admin)
+    try {
+      await insertDonation({
+        payment_id: result.id != null ? String(result.id) : null,
+        status: result.status || null,
+        status_detail: result.status_detail || null,
+        amount: result.transaction_amount ?? amount,
+        currency: process.env.MP_CURRENCY || "MXN",
+        payment_method_id: result.payment_method_id || paymentBody.payment_method_id || null,
+        payer_email: result.payer?.email || paymentBody.payer?.email || null,
+        donor_name: donorName || null,
+        message: message || null,
+        external_reference: externalRef,
+        user_id: user.id,
+        username: user.username,
+        raw_json: JSON.stringify({
+          id: result.id,
+          status: result.status,
+          status_detail: result.status_detail,
+          payment_method_id: result.payment_method_id,
+          transaction_amount: result.transaction_amount,
+          installments: result.installments,
+          date_created: result.date_created,
+        }),
+      });
+    } catch (dbErr) {
+      console.error("[process-payment] DB save failed", dbErr);
+    }
 
     res.status(200).json({
       id: result.id,

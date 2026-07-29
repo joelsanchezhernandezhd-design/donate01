@@ -378,6 +378,65 @@ h1 {
   word-break: break-word;
 }
 
+.full-input {
+  width: 100%;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: #121820;
+  color: var(--text);
+  font: inherit;
+  font-size: 0.95rem;
+  padding: 11px 14px;
+  margin-bottom: 12px;
+  outline: none;
+}
+
+.full-input:focus {
+  border-color: var(--accent);
+}
+
+.footer-link {
+  color: var(--accent);
+  text-decoration: none;
+  font-weight: 600;
+}
+
+.footer-link:hover {
+  text-decoration: underline;
+}
+
+.user-bar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  margin-bottom: 12px;
+  font-size: 0.85rem;
+  color: var(--muted);
+}
+
+.user-bar strong {
+  color: var(--text);
+}
+
+.user-bar a,
+.user-bar button.linkish {
+  color: var(--accent);
+  background: none;
+  border: none;
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+  text-decoration: none;
+  padding: 0;
+}
+
+.user-bar a:hover,
+.user-bar button.linkish:hover {
+  text-decoration: underline;
+}
+
 /* Result pages */
 .result {
   text-align: center;

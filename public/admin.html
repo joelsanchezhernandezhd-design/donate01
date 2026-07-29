@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Admin · Donaciones</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="admin.css" />
+  </head>
+  <body class="admin-body">
+    <div class="admin-wrap">
+      <header class="admin-top">
+        <div>
+          <h1>Panel de donaciones</h1>
+          <p class="admin-sub">
+            Administrador: <strong id="admin-user">—</strong>
+          </p>
+        </div>
+        <div class="admin-actions">
+          <a class="btn-ghost" href="/">Ir a donar</a>
+          <button type="button" class="btn-ghost" id="refresh-btn">Actualizar</button>
+          <button type="button" class="btn-danger" id="logout-btn">Salir</button>
+        </div>
+      </header>
+
+      <section class="stats" id="stats">
+        <div class="stat-card">
+          <span class="stat-label">Total registros</span>
+          <strong id="stat-count">—</strong>
+        </div>
+        <div class="stat-card">
+          <span class="stat-label">Aprobado (suma)</span>
+          <strong id="stat-sum">—</strong>
+        </div>
+      </section>
+
+      <p id="admin-error" class="error" hidden></p>
+      <p id="admin-loading" class="hint">Cargando…</p>
+
+      <div class="table-wrap">
+        <table class="donations-table" id="donations-table" hidden>
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Fecha</th>
+              <th>Monto</th>
+              <th>Estado</th>
+              <th>Detalle</th>
+              <th>Método</th>
+              <th>Email pagador</th>
+              <th>Nombre</th>
+              <th>Mensaje</th>
+              <th>Usuario app</th>
+              <th>Payment ID</th>
+            </tr>
+          </thead>
+          <tbody id="donations-body"></tbody>
+        </table>
+      </div>
+    </div>
+    <script src="admin.js"></script>
+  </body>
+</html>

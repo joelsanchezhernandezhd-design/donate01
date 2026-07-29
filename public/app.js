@@ -21,6 +21,10 @@
   const logCopyBtn = document.getElementById("debug-log-copy");
   const logClearBtn = document.getElementById("debug-log-clear");
   const amountButtons = document.querySelectorAll(".amount-btn");
+  const userBar = document.getElementById("user-bar");
+  const userNameEl = document.getElementById("user-name");
+  const adminLink = document.getElementById("admin-link");
+  const logoutLink = document.getElementById("logout-link");
 
   let currency = "MXN";
   let publicKey = "";
@@ -28,6 +32,7 @@
   let isSandbox = false;
   let paymentBrickController = null;
   let currentAmount = 0;
+  let currentUser = null;
   const logEntries = [];
   const sessionId =
     "sess_" + Date.now().toString(36) + "_" + Math.random().toString(36).slice(2, 8);
@@ -373,6 +378,7 @@
 
             fetch("/api/process-payment", {
               method: "POST",
+              credentials: "include",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             })
@@ -383,6 +389,10 @@
                   "process-payment response",
                   { status: response.status, data }
                 );
+                if (response.status === 401) {
+                  location.href = "/login.html?next=/";
+                  throw new Error("Sesión expirada. Iniciá sesión de nuevo.");
+                }
                 if (!response.ok) {
                   throw new Error(
                     data.error || "No se pudo procesar el pago."
@@ -525,8 +535,43 @@
 
   log("info", "App init", { sessionId, href: location.href, ua: navigator.userAgent });
 
-  loadConfig().catch((err) => {
-    log("error", "loadConfig failed", err);
-    showError(amountError, err.message || "Error de configuración.");
+  async function requireLogin() {
+    try {
+      const res = await fetch("/api/auth/me", { credentials: "include" });
+      const data = await res.json().catch(() => ({}));
+      if (!data.authenticated || !data.user) {
+        location.replace("/login.html?next=/");
+        return false;
+      }
+      currentUser = data.user;
+      if (userBar) userBar.hidden = false;
+      if (userNameEl) userNameEl.textContent = data.user.username;
+      if (adminLink && data.user.role === "admin") adminLink.hidden = false;
+      log("info", "Usuario autenticado", data.user);
+      return true;
+    } catch (e) {
+      log("error", "auth/me failed", e);
+      location.replace("/login.html?next=/");
+      return false;
+    }
+  }
+
+  if (logoutLink) {
+    logoutLink.addEventListener("click", async () => {
+      await fetch("/api/auth/logout", {
+        method: "POST",
+        credentials: "include",
+      });
+      location.href = "/login.html";
+    });
+  }
+
+  requireLogin().then((ok) => {
+    if (!ok) return;
+    loadConfig().catch((err) => {
+      log("error", "loadConfig failed", err);
+      showError(amountError, err.message || "Error de configuración.");
+    });
   });
 })();
+

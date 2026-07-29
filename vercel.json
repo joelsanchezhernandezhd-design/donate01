@@ -3,6 +3,10 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "rewrites": [
+    { "source": "/api/auth/login", "destination": "/api/auth/login" },
+    { "source": "/api/auth/logout", "destination": "/api/auth/logout" },
+    { "source": "/api/auth/me", "destination": "/api/auth/me" },
+    { "source": "/api/admin/donations", "destination": "/api/admin/donations" },
     { "source": "/api/config", "destination": "/api/config" },
     { "source": "/api/process-payment", "destination": "/api/process-payment" },
     { "source": "/api/diagnose", "destination": "/api/diagnose" },
