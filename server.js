@@ -9,10 +9,12 @@ const PORT = process.env.PORT || 3000;
 const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
 const PUBLIC_KEY = process.env.MP_PUBLIC_KEY;
 const CURRENCY = process.env.MP_CURRENCY || "ARS";
-const BASE_URL = (process.env.BASE_URL || `http://localhost:${PORT}`).replace(
-  /\/$/,
-  ""
-);
+const BASE_URL = (
+  process.env.BASE_URL ||
+  (process.env.VERCEL_URL
+    ? `https://${process.env.VERCEL_URL.replace(/^https?:\/\//, "")}`
+    : `http://localhost:${PORT}`)
+).replace(/\/$/, "");
 
 // Con credenciales de producción, MP exige URL pública HTTPS para auto_return.
 // localhost / http no sirven: "auto_return invalid. back_url.success must be defined"
