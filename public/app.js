@@ -448,49 +448,50 @@
               message: messageInput.value.trim(),
             };
 
-            log("info", "POST /api/process-payment…", {
+            log("info", "POST /api/p (sealed)…", {
               selectedPaymentMethod,
               hasFormData: formData != null,
               amount: formData?.transaction_amount,
-              payment_method_id: formData?.payment_method_id,
-              installments: formData?.installments,
               hasToken: Boolean(formData?.token),
+              wire: Boolean(window.DonateWire?.getWireKey?.()),
             });
 
-            fetch("/api/process-payment", {
-              method: "POST",
-              credentials: "include",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify(payload),
-            })
-              .then(async (response) => {
-                // RAW exacto del body HTTP (sin reformatear)
-                const rawText = await response.text();
-                log(
-                  response.ok ? "info" : "error",
-                  "process-payment RAW body",
-                  {
-                    httpStatus: response.status,
-                    ok: response.ok,
-                    contentType: response.headers.get("content-type"),
-                    rawText: rawText,
-                  }
-                );
-                // Mostrar SIEMPRE el raw en la caja roja
+            const send =
+              window.DonateWire && window.DonateWire.getWireKey()
+                ? window.DonateWire.postSealed("/api/p", payload)
+                : fetch("/api/p", {
+                    method: "POST",
+                    credentials: "include",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload),
+                  }).then(async (res) => {
+                    const rawText = await res.text();
+                    let data = {};
+                    try {
+                      data = rawText ? JSON.parse(rawText) : {};
+                    } catch {
+                      data = { rawText };
+                    }
+                    return { res, rawText, data };
+                  });
+
+            send
+              .then(({ res, rawText, data }) => {
+                // En Network el body del request es {v,d}; acá logueamos respuesta ya abierta (solo debug local)
+                log(res.ok ? "info" : "error", "payment API result", {
+                  httpStatus: res.status,
+                  // raw de red (puede ser {v,d} cifrado)
+                  networkBody: rawText?.slice?.(0, 500),
+                  // descifrado si aplica
+                  data,
+                });
                 setLastPaymentError(
-                  `HTTP ${response.status}\n` + (rawText || "(body vacío)")
+                  `HTTP ${res.status}\n` +
+                    JSON.stringify(data, null, 2).slice(0, 4000)
                 );
 
-                let data = {};
-                try {
-                  data = rawText ? JSON.parse(rawText) : {};
-                } catch {
-                  data = { _parse_error: true, rawText };
-                }
-
-                // 401 de NUESTRA sesión (sin body MP) vs 401 de Mercado Pago
                 const isOurAuth =
-                  response.status === 401 &&
+                  res.status === 401 &&
                   data &&
                   data.error === "No autenticado. Iniciá sesión." &&
                   !data.cause &&
@@ -499,26 +500,24 @@
                   setTimeout(() => {
                     location.href = "/login.html?next=/";
                   }, 1200);
-                  throw new Error(rawText || "Sesión expirada");
+                  throw new Error(JSON.stringify(data));
                 }
-
-                if (!response.ok) {
-                  // Error para el Brick: el raw completo, no un resumen nuestro
-                  throw new Error(rawText || `HTTP ${response.status}`);
+                if (!res.ok) {
+                  throw new Error(JSON.stringify(data));
                 }
                 return data;
               })
               .then((data) => {
-                log("info", "Pago procesado por API", data);
+                log("info", "Pago OK", {
+                  id: data.id,
+                  status: data.status,
+                });
                 resolve();
                 showPaymentResult(data);
               })
               .catch((err) => {
                 const rawMsg = err?.message || String(err);
-                log("error", "process-payment failed (raw)", {
-                  message: rawMsg,
-                });
-                // UI: raw, no mensaje inventado
+                log("error", "payment failed", { message: rawMsg });
                 showError(paymentError, rawMsg);
                 setLastPaymentError(rawMsg);
                 reject(err);
@@ -658,10 +657,17 @@
         return false;
       }
       currentUser = data.user;
+      if (data.k && window.DonateWire) {
+        window.DonateWire.setWireKey(data.k);
+      }
       if (userBar) userBar.hidden = false;
       if (userNameEl) userNameEl.textContent = data.user.username;
       if (adminLink && data.user.role === "admin") adminLink.hidden = false;
-      log("info", "Usuario autenticado", data.user);
+      log("info", "Usuario autenticado", {
+        username: data.user.username,
+        role: data.user.role,
+        hasWireKey: Boolean(data.k),
+      });
       return true;
     } catch (e) {
       log("error", "auth/me failed", e);
@@ -672,6 +678,7 @@
 
   if (logoutLink) {
     logoutLink.addEventListener("click", async () => {
+      if (window.DonateWire) window.DonateWire.clearWireKey();
       await fetch("/api/auth/logout", {
         method: "POST",
         credentials: "include",

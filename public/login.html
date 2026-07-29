@@ -93,10 +93,16 @@
             const data = await res.json().catch(() => ({}));
             if (!res.ok) throw new Error(data.error || "No se pudo iniciar sesión");
 
+            // Clave de ofuscación de sesión (solo esta pestaña)
+            if (data.k) {
+              try {
+                sessionStorage.setItem("donate_wk_v1", data.k);
+              } catch (_) {}
+            }
+
             if (data.user?.role === "admin" && (next === "/admin.html" || next === "/admin")) {
               location.href = "/admin.html";
             } else if (data.user?.role === "admin" && next === "/") {
-              // admin puede ir a donar o a panel
               location.href = next;
             } else {
               location.href = next.startsWith("/") ? next : "/";

@@ -17,7 +17,15 @@ module.exports = async function handler(req, res) {
       res.status(401).json({ authenticated: false });
       return;
     }
-    res.status(200).json({ authenticated: true, user });
+    res.status(200).json({
+      authenticated: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      },
+      k: user.wireKey || null,
+    });
   } catch (err) {
     console.error("[auth/me]", err);
     res.status(500).json({ authenticated: false, error: err.message });

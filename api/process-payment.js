@@ -2,6 +2,7 @@ const { MercadoPagoConfig, Payment } = require("mercadopago");
 const crypto = require("crypto");
 const { requireUser } = require("../lib/auth");
 const { initDb, insertDonation } = require("../lib/db");
+const { readRequestBody, sealedResponse } = require("../lib/wire");
 
 module.exports = async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Credentials", "true");
@@ -24,29 +25,49 @@ module.exports = async function handler(req, res) {
   let message = "";
   let externalRef = null;
   let paymentBody = null;
+  let sealed = false; // cliente mandó body ofuscado → responder ofuscado
+
+  function sendJson(status, obj) {
+    if (sealed && user?.wireKey) {
+      res.status(status).json(sealedResponse(obj, user.wireKey));
+    } else {
+      res.status(status).json(obj);
+    }
+  }
 
   try {
     await initDb();
     user = await requireUser(req, res);
     if (!user) return;
 
+    sealed = Boolean(req.body && req.body.v === 1 && req.body.d);
+    let payload;
+    try {
+      payload = readRequestBody(req.body, user.wireKey);
+    } catch (e) {
+      console.error("[process-payment] unpack failed", e.message);
+      sendJson(400, { error: "Payload inválido", code: "BAD_WIRE" });
+      return;
+    }
+
     const ACCESS_TOKEN = (process.env.MP_ACCESS_TOKEN || "").trim();
     console.log("[process-payment] start", {
       user: user.username,
       hasToken: Boolean(ACCESS_TOKEN),
-      selectedPaymentMethod: req.body?.selectedPaymentMethod,
+      sealed,
+      selectedPaymentMethod: payload?.selectedPaymentMethod,
     });
 
     if (!ACCESS_TOKEN || ACCESS_TOKEN.includes("xxxxxxxx")) {
-      res.status(500).json({
+      sendJson(500, {
         error: "Falta MP_ACCESS_TOKEN de producción en Vercel.",
       });
       return;
     }
 
-    const formData = req.body?.formData ?? req.body;
+    const formData = payload?.formData ?? payload;
     if (!formData || typeof formData !== "object") {
-      res.status(400).json({ error: "Faltan datos del pago." });
+      sendJson(400, { error: "Faltan datos del pago." });
       return;
     }
 
@@ -54,7 +75,7 @@ module.exports = async function handler(req, res) {
       formData === null ||
       formData.selectedPaymentMethod === "wallet_purchase"
     ) {
-      res.status(400).json({
+      sendJson(400, {
         error:
           "Para pagar con cuenta Mercado Pago usá tarjeta u otro medio en el formulario.",
       });
@@ -67,7 +88,7 @@ module.exports = async function handler(req, res) {
         : formData;
 
     if (!paymentBody || !paymentBody.transaction_amount) {
-      res.status(400).json({
+      sendJson(400, {
         error: "Datos de pago incompletos.",
         receivedKeys: paymentBody ? Object.keys(paymentBody) : null,
       });
@@ -76,12 +97,12 @@ module.exports = async function handler(req, res) {
 
     amount = Number(paymentBody.transaction_amount);
     if (!Number.isFinite(amount) || amount < 1) {
-      res.status(400).json({ error: "Monto inválido." });
+      sendJson(400, { error: "Monto inválido." });
       return;
     }
 
-    donorName = String(req.body?.donorName || "").trim().slice(0, 80);
-    message = String(req.body?.message || "").trim().slice(0, 200);
+    donorName = String(payload?.donorName || "").trim().slice(0, 80);
+    message = String(payload?.message || "").trim().slice(0, 200);
     externalRef = `donation-${Date.now()}`;
 
     // Campos que a veces rompen el create si vienen null raros del Brick
@@ -176,7 +197,7 @@ module.exports = async function handler(req, res) {
       console.error("[process-payment] DB save failed", dbErr);
     }
 
-    res.status(200).json({
+    sendJson(200, {
       id: result.id,
       status: result.status,
       status_detail: result.status_detail,
@@ -241,11 +262,9 @@ module.exports = async function handler(req, res) {
     const httpStatus =
       err?.status && err.status >= 400 && err.status < 600 ? err.status : 500;
 
-    // Devolver el body lo más fiel posible a lo que mandó MP
-    res.status(httpStatus).json({
-      // capa mínima nuestra solo para que el front sepa que es raw
+    // RAW de MP; si el cliente usa wire, va cifrado en {v,d}
+    sendJson(httpStatus, {
       _raw: true,
-      // eco del error de MP/SDK sin reescribir textos
       message: raw.message,
       error: raw.error || raw.message,
       status: raw.status,

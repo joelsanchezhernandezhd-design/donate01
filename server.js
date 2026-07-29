@@ -41,7 +41,7 @@ app.post("/api/auth/login", async (req, res) => {
     const result = await login(username, password);
     if (!result.ok) return res.status(401).json({ error: result.error });
     res.setHeader("Set-Cookie", sessionCookie(result.token));
-    res.json({ ok: true, user: result.user });
+    res.json({ ok: true, user: result.user, k: result.wireKey });
   } catch (err) {
     console.error(err);
     res.status(500).json({ error: err.message });
@@ -58,11 +58,24 @@ app.get("/api/auth/me", async (req, res) => {
     await initDb();
     const user = await getSessionUser(req);
     if (!user) return res.status(401).json({ authenticated: false });
-    res.json({ authenticated: true, user });
+    res.json({
+      authenticated: true,
+      user: {
+        id: user.id,
+        username: user.username,
+        role: user.role,
+      },
+      k: user.wireKey || null,
+    });
   } catch (err) {
     res.status(500).json({ authenticated: false, error: err.message });
   }
 });
+
+// Alias opaco del pago (misma lógica que process-payment)
+const processPaymentHandler = require("./api/process-payment");
+app.post("/api/p", (req, res) => processPaymentHandler(req, res));
+app.post("/api/process-payment", (req, res) => processPaymentHandler(req, res));
 
 app.get("/api/admin/donations", async (req, res) => {
   try {
@@ -91,93 +104,6 @@ app.get("/api/config", (_req, res) => {
 app.post("/api/log", (req, res) => {
   console.log("[client-log]", JSON.stringify(req.body || {}));
   res.status(204).end();
-});
-
-app.post("/api/process-payment", async (req, res) => {
-  try {
-    await initDb();
-    const user = await requireUser(req, res);
-    if (!user) return;
-
-    if (!ACCESS_TOKEN) {
-      return res.status(500).json({ error: "Falta MP_ACCESS_TOKEN" });
-    }
-
-    const formData = req.body?.formData ?? req.body;
-    const paymentBody =
-      formData?.formData && formData?.selectedPaymentMethod
-        ? formData.formData
-        : formData;
-
-    if (!paymentBody?.transaction_amount) {
-      return res.status(400).json({ error: "Datos de pago incompletos." });
-    }
-
-    const amount = Number(paymentBody.transaction_amount);
-    const donorName = String(req.body?.donorName || "").trim().slice(0, 80);
-    const message = String(req.body?.message || "").trim().slice(0, 200);
-    const externalRef = `donation-${Date.now()}`;
-
-    const body = {
-      ...paymentBody,
-      transaction_amount: Math.round(amount * 100) / 100,
-      description: message
-        ? `Donación${donorName ? ` — ${donorName}` : ""}: ${message}`.slice(0, 250)
-        : `Donación a la tienda${donorName ? ` — ${donorName}` : ""}`.slice(0, 250),
-      external_reference: externalRef,
-      metadata: {
-        type: "donation",
-        donor_name: donorName || null,
-        message: message || null,
-        app_user: user.username,
-      },
-    };
-
-    const client = new MercadoPagoConfig({ accessToken: ACCESS_TOKEN });
-    const payment = new Payment(client);
-    const result = await payment.create({
-      body,
-      requestOptions: {
-        idempotencyKey:
-          crypto.randomUUID?.() || crypto.randomBytes(16).toString("hex"),
-      },
-    });
-
-    try {
-      await insertDonation({
-        payment_id: result.id != null ? String(result.id) : null,
-        status: result.status,
-        status_detail: result.status_detail,
-        amount: result.transaction_amount ?? amount,
-        currency: CURRENCY,
-        payment_method_id: result.payment_method_id,
-        payer_email: result.payer?.email || paymentBody.payer?.email,
-        donor_name: donorName,
-        message,
-        external_reference: externalRef,
-        user_id: user.id,
-        username: user.username,
-        raw_json: JSON.stringify({
-          id: result.id,
-          status: result.status,
-          status_detail: result.status_detail,
-        }),
-      });
-    } catch (e) {
-      console.error("save donation", e);
-    }
-
-    res.json({
-      id: result.id,
-      status: result.status,
-      status_detail: result.status_detail,
-      payment_method_id: result.payment_method_id,
-      transaction_amount: result.transaction_amount,
-    });
-  } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: err.message || "Error de pago" });
-  }
 });
 
 initDb()

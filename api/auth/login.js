@@ -36,6 +36,8 @@ module.exports = async function handler(req, res) {
     res.status(200).json({
       ok: true,
       user: result.user,
+      // clave de ofuscación de esta sesión (el cliente la guarda en sessionStorage)
+      k: result.wireKey,
     });
   } catch (err) {
     console.error("[auth/login]", err);
@@ -43,7 +45,6 @@ module.exports = async function handler(req, res) {
       error:
         err?.message ||
         "Error de login. Revisá DATABASE_URL (Turso) y SESSION_SECRET en Vercel.",
-      detail: String(err?.cause || err?.stack || "").slice(0, 500),
     });
   }
 };
