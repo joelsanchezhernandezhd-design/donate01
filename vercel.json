@@ -3,6 +3,7 @@
   "buildCommand": "",
   "outputDirectory": "public",
   "rewrites": [
+    { "source": "/api/health", "destination": "/api/health" },
     { "source": "/api/auth/login", "destination": "/api/auth/login" },
     { "source": "/api/auth/logout", "destination": "/api/auth/logout" },
     { "source": "/api/auth/me", "destination": "/api/auth/me" },
