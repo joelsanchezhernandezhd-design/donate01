@@ -5,8 +5,14 @@ module.exports = function handler(req, res) {
     return;
   }
 
+  const publicKey = process.env.MP_PUBLIC_KEY || "";
+  const isTestKey = /^TEST-/i.test(publicKey);
+
   res.status(200).json({
-    publicKey: process.env.MP_PUBLIC_KEY || "",
+    publicKey,
     currency: process.env.MP_CURRENCY || "MXN",
+    locale: process.env.MP_LOCALE || "es-MX",
+    // true solo si usás claves TEST- (sandbox)
+    isSandbox: isTestKey,
   });
 };

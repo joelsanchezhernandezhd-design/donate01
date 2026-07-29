@@ -1,65 +1,61 @@
-require("dotenv").config();
-const express = require("express");
-const cors = require("cors");
-const path = require("path");
-const crypto = require("crypto");
 const { MercadoPagoConfig, Payment } = require("mercadopago");
+const crypto = require("crypto");
 
-const app = express();
-const PORT = process.env.PORT || 3000;
-const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
-const PUBLIC_KEY = process.env.MP_PUBLIC_KEY;
-const CURRENCY = process.env.MP_CURRENCY || "MXN";
-const LOCALE = process.env.MP_LOCALE || "es-MX";
+module.exports = async function handler(req, res) {
+  res.setHeader("Access-Control-Allow-Origin", "*");
+  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
+  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 
-if (!ACCESS_TOKEN || ACCESS_TOKEN.includes("xxxxxxxx")) {
-  console.warn(
-    "\n⚠️  Falta MP_ACCESS_TOKEN en .env — usá claves de PRODUCCIÓN (APP_USR-...).\n"
-  );
-}
+  if (req.method === "OPTIONS") {
+    res.status(200).end();
+    return;
+  }
 
-app.use(cors());
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public")));
+  if (req.method !== "POST") {
+    res.status(405).json({ error: "Método no permitido" });
+    return;
+  }
 
-app.get("/api/config", (_req, res) => {
-  const isSandbox = /^TEST-/i.test(PUBLIC_KEY || "");
-  res.json({
-    publicKey: PUBLIC_KEY || "",
-    currency: CURRENCY,
-    locale: LOCALE,
-    isSandbox,
-  });
-});
-
-// Checkout Bricks → Payments API (producción con APP_USR-)
-app.post("/api/process-payment", async (req, res) => {
   try {
+    const ACCESS_TOKEN = process.env.MP_ACCESS_TOKEN;
     if (!ACCESS_TOKEN || ACCESS_TOKEN.includes("xxxxxxxx")) {
-      return res.status(500).json({
-        error: "Configurá MP_ACCESS_TOKEN de producción en .env",
+      res.status(500).json({
+        error: "Falta MP_ACCESS_TOKEN de producción en Vercel.",
       });
+      return;
     }
 
+    // formData viene del Payment Brick (Checkout Bricks)
     const formData = req.body?.formData ?? req.body;
     if (!formData || typeof formData !== "object") {
-      return res.status(400).json({ error: "Faltan datos del pago." });
+      res.status(400).json({ error: "Faltan datos del pago." });
+      return;
     }
 
+    // wallet_purchase del Brick a veces manda formData null (usa preference)
+    if (formData === null || formData.selectedPaymentMethod === "wallet_purchase") {
+      res.status(400).json({
+        error:
+          "Para pagar con cuenta Mercado Pago usá tarjeta u otro medio en el formulario, o contactá soporte para Wallet.",
+      });
+      return;
+    }
+
+    // El Brick envuelve a veces: { selectedPaymentMethod, formData }
     const paymentBody =
       formData.formData && formData.selectedPaymentMethod
         ? formData.formData
         : formData;
 
-    if (!paymentBody || paymentBody === null || !paymentBody.transaction_amount) {
-      return res.status(400).json({
-        error: "Datos de pago incompletos (elegí tarjeta u otro medio en el formulario).",
-      });
+    if (!paymentBody || !paymentBody.transaction_amount) {
+      res.status(400).json({ error: "Datos de pago incompletos." });
+      return;
     }
 
     const amount = Number(paymentBody.transaction_amount);
     if (!Number.isFinite(amount) || amount < 1) {
-      return res.status(400).json({ error: "Monto inválido." });
+      res.status(400).json({ error: "Monto inválido." });
+      return;
     }
 
     const donorName = String(req.body?.donorName || "").trim().slice(0, 80);
@@ -79,11 +75,13 @@ app.post("/api/process-payment", async (req, res) => {
       },
     };
 
+    // Producción: Access Token APP_USR-... (nunca TEST-)
     const client = new MercadoPagoConfig({
       accessToken: ACCESS_TOKEN,
       options: { timeout: 10000 },
     });
     const payment = new Payment(client);
+
     const idempotencyKey =
       req.headers["x-idempotency-key"] ||
       crypto.randomUUID?.() ||
@@ -94,7 +92,7 @@ app.post("/api/process-payment", async (req, res) => {
       requestOptions: { idempotencyKey },
     });
 
-    res.json({
+    res.status(200).json({
       id: result.id,
       status: result.status,
       status_detail: result.status_detail,
@@ -107,20 +105,12 @@ app.post("/api/process-payment", async (req, res) => {
     let detail = err?.message || "No se pudo procesar el pago.";
     if (Array.isArray(mpCause) && mpCause[0]) {
       detail = mpCause[0].description || mpCause[0].message || detail;
+    } else if (mpCause?.message) {
+      detail = mpCause.message;
     }
-    res.status(err?.status || 500).json({ error: detail });
+    res.status(err?.status || 500).json({
+      error: detail,
+      status: err?.status || null,
+    });
   }
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  const isSandbox = /^TEST-/i.test(PUBLIC_KEY || "");
-  console.log(`\n💚 Donaciones — Checkout Bricks (integrado)`);
-  console.log(`   → http://localhost:${PORT}`);
-  console.log(`   Moneda: ${CURRENCY}`);
-  console.log(`   Modo: ${isSandbox ? "SANDBOX (TEST-)" : "PRODUCCIÓN (APP_USR-)"}`);
-  console.log(
-    `   Token: ${
-      ACCESS_TOKEN && !ACCESS_TOKEN.includes("xxxxxxxx") ? "OK" : "NO CONFIGURADO"
-    }\n`
-  );
-});
+};

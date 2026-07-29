@@ -257,6 +257,78 @@ h1 {
   color: var(--text);
 }
 
+.mode-label {
+  margin-left: 4px;
+  font-size: 0.75rem;
+  opacity: 0.85;
+}
+
+.env-badge {
+  margin: 12px 0 0;
+  display: inline-block;
+  font-size: 0.8rem;
+  font-weight: 600;
+  padding: 6px 12px;
+  border-radius: 999px;
+}
+
+.env-badge.ok {
+  color: #7dffa3;
+  background: rgba(0, 166, 80, 0.15);
+  border: 1px solid rgba(0, 166, 80, 0.35);
+}
+
+.env-badge.warn {
+  color: #ffd37a;
+  background: rgba(255, 180, 0, 0.12);
+  border: 1px solid rgba(255, 180, 0, 0.35);
+}
+
+.payment-header {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.back-btn {
+  align-self: flex-start;
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0;
+}
+
+.back-btn:hover {
+  text-decoration: underline;
+}
+
+.pay-summary {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.pay-summary strong {
+  color: var(--text);
+  font-size: 1.15rem;
+}
+
+#paymentBrick_container {
+  min-height: 120px;
+  margin-top: 4px;
+}
+
+.result-detail {
+  font-size: 0.85rem !important;
+  word-break: break-all;
+}
+
 /* Result pages */
 .result {
   text-align: center;

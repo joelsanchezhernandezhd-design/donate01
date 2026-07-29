@@ -4,6 +4,6 @@
   "outputDirectory": "public",
   "rewrites": [
     { "source": "/api/config", "destination": "/api/config" },
-    { "source": "/api/create-preference", "destination": "/api/create-preference" }
+    { "source": "/api/process-payment", "destination": "/api/process-payment" }
   ]
 }
