@@ -27,9 +27,8 @@
   let isSandbox = false;
   let paymentBrickController = null;
   let currentAmount = 0;
-  // En MX, Visa/BBVA exige min ~$5 en 1 cuota y ~$10 en más cuotas.
-  // Con $1 el API trae installments pero el Brick filtra TODO → empty_installments.
-  const MIN_AMOUNT = 10;
+  // Deploy de prueba: sin tope mínimo en UI (MP puede rechazar montos muy bajos)
+  const MIN_AMOUNT = 1;
   const LOG_KEY = "donate_debug_logs_v1";
   const ERR_KEY = "donate_last_payment_error_v1";
   const logEntries = [];
@@ -411,12 +410,7 @@
           let hint = "";
           if (/empty_installments/i.test(cause)) {
             hint =
-              " (empty_installments: el monto es menor al mínimo de la tarjeta o la cuenta es TESTUSER. Probá $10 o más. En Network el API puede mostrar cuotas, pero con min_allowed_amount el Brick las descarta.)";
-          } else if (
-            /payment_method|bin|public_key|get_card|get_payment/i.test(cause)
-          ) {
-            hint =
-              " (BIN/medios: tarjeta inválida o cuenta de prueba. No uses números inventados.)";
+              " (empty_installments: a veces el monto es bajo para esa tarjeta; probá $10+.)";
           }
           showError(
             paymentError,
