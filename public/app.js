@@ -146,20 +146,20 @@
         customization: {
           visual: {
             style: {
-              theme: "dark",
+              theme: "default",
             },
             texts: {
               formSubmit: "Donar ahora",
             },
           },
+          // Incluir prepaid (cambio MP 2025) y tickets MX (OXXO, etc.)
           paymentMethods: {
-            maxInstallments: 1,
+            maxInstallments: 12,
             creditCard: "all",
             debitCard: "all",
-            // ticket / atm en MX; wallet puede redirigir a MP
+            prepaidCard: "all",
             ticket: "all",
             atm: "all",
-            // sin mercadoPago wallet para evitar redirección a cuenta MP
           },
         },
         callbacks: {
@@ -168,16 +168,20 @@
           },
           onError: (error) => {
             console.error("Payment Brick error:", error);
-            if (error?.type === "critical") {
-              showError(
-                paymentError,
-                error.message || "Error al cargar el formulario de pago."
-              );
-            }
+            const cause = error?.cause || error?.message || "";
+            const hint =
+              /payment_method|bin|public_key|get_card|get_payment/i.test(
+                String(cause)
+              )
+                ? " Suele ser Public Key incorrecta, claves TEST/PROD mezcladas, o número de tarjeta inválido (no uses números inventados)."
+                : "";
+            showError(
+              paymentError,
+              (error?.message || "Error en el formulario de pago.") + hint
+            );
           },
           onSubmit: ({ selectedPaymentMethod, formData }) => {
             return new Promise((resolve, reject) => {
-              // El Brick a veces envía formData ya listo para /v1/payments
               const payload = {
                 formData:
                   formData != null

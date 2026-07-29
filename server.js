@@ -25,11 +25,84 @@ app.use(express.static(path.join(__dirname, "public")));
 app.get("/api/config", (_req, res) => {
   const isSandbox = /^TEST-/i.test(PUBLIC_KEY || "");
   res.json({
-    publicKey: PUBLIC_KEY || "",
+    publicKey: (PUBLIC_KEY || "").trim(),
     currency: CURRENCY,
     locale: LOCALE,
     isSandbox,
   });
+});
+
+// Diagnóstico de claves (abrir en el navegador: /api/diagnose)
+app.get("/api/diagnose", async (_req, res) => {
+  try {
+    const accessToken = (ACCESS_TOKEN || "").trim();
+    const publicKey = (PUBLIC_KEY || "").trim();
+    const report = {
+      ok: true,
+      currency: CURRENCY,
+      publicKey: {
+        present: Boolean(publicKey),
+        prefix: publicKey.slice(0, 8) || null,
+        isProduction: /^APP_USR-/i.test(publicKey),
+        isTest: /^TEST-/i.test(publicKey),
+      },
+      accessToken: {
+        present: Boolean(accessToken),
+        prefix: accessToken.slice(0, 8) || null,
+        isProduction: /^APP_USR-/i.test(accessToken),
+        isTest: /^TEST-/i.test(accessToken),
+      },
+      tips: [],
+    };
+
+    if (!accessToken || !publicKey) {
+      report.ok = false;
+      report.tips.push("Faltan claves en .env / Vercel.");
+      return res.json(report);
+    }
+
+    const userRes = await fetch("https://api.mercadopago.com/users/me", {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    const userData = await userRes.json().catch(() => ({}));
+    report.user = userRes.ok
+      ? { id: userData.id, site_id: userData.site_id, nickname: userData.nickname }
+      : { error: userData.message || userRes.status };
+
+    const pkRes = await fetch(
+      `https://api.mercadopago.com/v1/payment_methods?public_key=${encodeURIComponent(publicKey)}`
+    );
+    report.publicKeyPaymentMethods = { http: pkRes.status, ok: pkRes.ok };
+    if (!pkRes.ok) {
+      report.ok = false;
+      report.tips.push(
+        "Public Key no lista medios de pago → el Brick no reconoce tarjetas."
+      );
+    }
+
+    const pmRes = await fetch(
+      "https://api.mercadopago.com/v1/payment_methods",
+      { headers: { Authorization: `Bearer ${accessToken}` } }
+    );
+    const pmData = await pmRes.json().catch(() => []);
+    if (pmRes.ok && Array.isArray(pmData)) {
+      report.cardMethods = pmData.filter((m) =>
+        String(m.payment_type_id || "").includes("card")
+      ).length;
+    } else {
+      report.ok = false;
+      report.tips.push("Access Token no lista medios de pago.");
+    }
+
+    if (report.ok) {
+      report.tips.push(
+        "Credenciales OK. Probá con tarjeta real o tarjetas de prueba oficiales (no números inventados)."
+      );
+    }
+    res.json(report);
+  } catch (e) {
+    res.status(500).json({ ok: false, error: e.message });
+  }
 });
 
 // Checkout Bricks → Payments API (producción con APP_USR-)

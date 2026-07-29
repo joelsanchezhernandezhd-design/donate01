@@ -5,7 +5,7 @@ module.exports = function handler(req, res) {
     return;
   }
 
-  const publicKey = process.env.MP_PUBLIC_KEY || "";
+  const publicKey = (process.env.MP_PUBLIC_KEY || "").trim();
   const isTestKey = /^TEST-/i.test(publicKey);
 
   res.status(200).json({
